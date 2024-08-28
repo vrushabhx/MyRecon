@@ -1,66 +1,55 @@
 #!/bin/bash
 
-# Check if a target was provided
+# Ensure a target domain is provided
 if [ -z "$1" ]; then
-    echo "Usage: $0 <target-domain>"
+    echo "Usage: $0 <target-domain> [--proxy]"
     exit 1
 fi
 
-# Define the target domain from the first argument
 TARGET=$1
+BASE_DIR="/Users/apple/Desktop/Targets"
 
-# Define output directories
-OUTPUT_DIR="output"
-mkdir -p $OUTPUT_DIR
+# Replace '.' with '_' in the target domain for the directory name
+TARGET_DIR_NAME=${TARGET//./_}
+TARGET_DIR="$BASE_DIR/$TARGET_DIR_NAME"
 
-# Define proxy settings for Burp Suite
 PROXY="http://127.0.0.1:8080"
+PROXY_OPTION=""
 
-# Step 1: Run Subfinder to find subdomains
-echo "[+] Running Subfinder on $TARGET..."
-subfinder -d $TARGET -o $OUTPUT_DIR/subdomains.txt --proxy $PROXY
-echo "[+] Subfinder completed. Output saved to $OUTPUT_DIR/subdomains.txt"
-
-# Step 2: Use httpx to probe for live web servers
-echo "[+] Running httpx on subdomains..."
-httpx -l $OUTPUT_DIR/subdomains.txt -o $OUTPUT_DIR/live_hosts.txt --proxy $PROXY
-echo "[+] httpx completed. Output saved to $OUTPUT_DIR/live_hosts.txt"
-
-# Check for 403 Forbidden responses
-echo "[+] Checking for 403 Forbidden responses..."
-grep "403" $OUTPUT_DIR/live_hosts.txt > $OUTPUT_DIR/403_hosts.txt
-
-if [ -s $OUTPUT_DIR/403_hosts.txt ]; then
-    echo "[+] Found 403 responses. Attempting bypass..."
-    
-    # Attempt to bypass 403 using bypass-403 tool
-    while read -r url; do
-        echo "[+] Attempting 403 bypass on $url..."
-        bypass-403 -u $url -o $OUTPUT_DIR/bypass_403_results.txt --proxy $PROXY
-    done < $OUTPUT_DIR/403_hosts.txt
-
-    echo "[+] 403 bypass attempts completed. Results saved to $OUTPUT_DIR/bypass_403_results.txt"
-else
-    echo "[+] No 403 responses found. Skipping 403 bypass."
+# Check if --proxy argument is provided
+if [[ "$@" == *"--proxy"* ]]; then
+    PROXY_OPTION="--proxy $PROXY"
 fi
 
-# Step 3: Use Katana for crawling the live hosts
-echo "[+] Running Katana on live hosts..."
-# Correct usage of Katana tool
-katana -list $OUTPUT_DIR/live_hosts.txt -o $OUTPUT_DIR/katana_output.txt --proxy $PROXY
-echo "[+] Katana completed. Output saved to $OUTPUT_DIR/katana_output.txt"
+# Create target directory
+mkdir -p $TARGET_DIR
 
-# Step 4: Run Nuclei for vulnerability scanning on the live hosts
-echo "[+] Running Nuclei on live hosts..."
-nuclei -l $OUTPUT_DIR/live_hosts.txt -o $OUTPUT_DIR/nuclei_output.txt --proxy $PROXY
-echo "[+] Nuclei completed. Output saved to $OUTPUT_DIR/nuclei_output.txt"
+# 1. Subdomain Enumeration
+echo "[+] Running Subfinder..."
+subfinder -d $TARGET -o $TARGET_DIR/subdomains.txt $PROXY_OPTION
 
-# Step 5: Combine all outputs into a single file
-echo "[+] Combining outputs..."
-cat $OUTPUT_DIR/subdomains.txt $OUTPUT_DIR/live_hosts.txt $OUTPUT_DIR/katana_output.txt $OUTPUT_DIR/nuclei_output.txt $OUTPUT_DIR/bypass_403_results.txt > $OUTPUT_DIR/final_output.txt
-echo "[+] All outputs combined into $OUTPUT_DIR/final_output.txt"
+echo "[+] Running httpx..."
+httpx -l $TARGET_DIR/subdomains.txt -o $TARGET_DIR/live_hosts.txt $PROXY_OPTION
 
-# Optional: Clean up intermediate files
-rm $OUTPUT_DIR/subdomains.txt $OUTPUT_DIR/live_hosts.txt $OUTPUT_DIR/katana_output.txt $OUTPUT_DIR/nuclei_output.txt $OUTPUT_DIR/403_hosts.txt
+# 2. Historical URL Discovery
+echo "[+] Running waybackurls..."
+waybackurls $TARGET > $TARGET_DIR/waybackurls.txt 
 
-echo "[+] Script execution completed. Final output available in $OUTPUT_DIR/final_output.txt"
+# 3. 403 Forbidden Bypass (if applicable)
+if grep -q "403" $TARGET_DIR/live_hosts.txt; then
+    echo "[+] Found 403 responses. Attempting bypass..."
+    while read -r url; do
+        bypass-403 -u $url -o $TARGET_DIR/bypass_403_results.txt $PROXY_OPTION
+    done < <(grep "403" $TARGET_DIR/live_hosts.txt)
+else
+    echo "[+] No 403 responses found."
+fi
+
+# 4. Crawling & Vulnerability Scanning
+echo "[+] Running Katana..."
+katana -list $TARGET_DIR/live_hosts.txt -o $TARGET_DIR/katana_output.txt $PROXY_OPTION
+
+echo "[+] Running Nuclei..."
+nuclei -l $TARGET_DIR/live_hosts.txt -o $TARGET_DIR/nuclei_output.txt $PROXY_OPTION
+
+echo "[+] Reconnaissance completed. Results are in $TARGET_DIR"
