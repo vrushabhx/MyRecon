@@ -13,14 +13,17 @@ TARGET=$1
 OUTPUT_DIR="output"
 mkdir -p $OUTPUT_DIR
 
+# Define proxy settings for Burp Suite
+PROXY="http://127.0.0.1:8080"
+
 # Step 1: Run Subfinder to find subdomains
 echo "[+] Running Subfinder on $TARGET..."
-subfinder -d $TARGET -o $OUTPUT_DIR/subdomains.txt
+subfinder -d $TARGET -o $OUTPUT_DIR/subdomains.txt --proxy $PROXY
 echo "[+] Subfinder completed. Output saved to $OUTPUT_DIR/subdomains.txt"
 
 # Step 2: Use httpx to probe for live web servers
 echo "[+] Running httpx on subdomains..."
-httpx -l $OUTPUT_DIR/subdomains.txt -o $OUTPUT_DIR/live_hosts.txt
+httpx -l $OUTPUT_DIR/subdomains.txt -o $OUTPUT_DIR/live_hosts.txt --proxy $PROXY
 echo "[+] httpx completed. Output saved to $OUTPUT_DIR/live_hosts.txt"
 
 # Check for 403 Forbidden responses
@@ -33,7 +36,7 @@ if [ -s $OUTPUT_DIR/403_hosts.txt ]; then
     # Attempt to bypass 403 using bypass-403 tool
     while read -r url; do
         echo "[+] Attempting 403 bypass on $url..."
-        bypass-403 -u $url -o $OUTPUT_DIR/bypass_403_results.txt
+        bypass-403 -u $url -o $OUTPUT_DIR/bypass_403_results.txt --proxy $PROXY
     done < $OUTPUT_DIR/403_hosts.txt
 
     echo "[+] 403 bypass attempts completed. Results saved to $OUTPUT_DIR/bypass_403_results.txt"
@@ -43,12 +46,13 @@ fi
 
 # Step 3: Use Katana for crawling the live hosts
 echo "[+] Running Katana on live hosts..."
-katana -u -f urls -i $OUTPUT_DIR/live_hosts.txt -o $OUTPUT_DIR/katana_output.txt
+# Correct usage of Katana tool
+katana -list $OUTPUT_DIR/live_hosts.txt -o $OUTPUT_DIR/katana_output.txt --proxy $PROXY
 echo "[+] Katana completed. Output saved to $OUTPUT_DIR/katana_output.txt"
 
 # Step 4: Run Nuclei for vulnerability scanning on the live hosts
 echo "[+] Running Nuclei on live hosts..."
-nuclei -l $OUTPUT_DIR/live_hosts.txt -o $OUTPUT_DIR/nuclei_output.txt
+nuclei -l $OUTPUT_DIR/live_hosts.txt -o $OUTPUT_DIR/nuclei_output.txt --proxy $PROXY
 echo "[+] Nuclei completed. Output saved to $OUTPUT_DIR/nuclei_output.txt"
 
 # Step 5: Combine all outputs into a single file
